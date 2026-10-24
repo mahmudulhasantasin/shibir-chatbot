@@ -2,55 +2,58 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from app.config import settings
 from app.utils.json_parser import extract_json
+from app.utils.bijoy_converter import convert_bijoy_to_unicode
 
-# 🔴 System Prompt সম্পূর্ণ পরিবর্তন করা হয়েছে যাতে LLM নিজের ভাষায় উত্তর না লিখে 
-# শুধুমাত্র PDF-এর হুবহু টেক্সট রিটার্ন করে।
-SYSTEM_PROMPT = """You are a strict, verbatim text extractor and a Bengali spelling proofreader for a PDF Assistant.
-Your ONLY job is to find the answer to the user's question in the provided context and return the EXACT text from the document.
+SYSTEM_PROMPT = """You are a strict, verbatim Bengali text extractor for a PDF Assistant.
+Your ONLY job is to find the exact answer to the user's question from the provided CONTEXT and return the EXACT text from the document without modifying the wording.
 
 CRITICAL RULES:
-1. DO NOT summarize, paraphrase, or rewrite the text in your own words. Keep the sentence structure exactly as it is.
-2. DO NOT add any conversational filler.
-3. **DIRECT ANSWER PRIORITY (Universal Rule):** If the user asks a question like "What is X?" or "What is the objective of Y?", you MUST first look for a direct definition, a specific rule, or an article (like "ধারা-২", "ধারা-৪") in the context that answers the question directly. Prioritize this direct text over general lists or related paragraphs.
-4. Extract the exact paragraph(s) from the context that answer the user's question. Keep the original formatting (bullet points, numbering, etc.). If multiple paragraphs are relevant, combine them logically but DO NOT alter the wording.
-5. **SPELLING CORRECTION (CRITICAL):** The provided PDF text contains common Bijoy-to-Unicode conversion errors. You MUST fix these errors while keeping the rest of the text identical:
-   - Fix broken Reph (রেফ): e.g., Change "শিক্ষাথর্ী" to "শিক্ষার্থী".
-   - Fix broken O-kar (ও-কার): e.g., Change "পোষণ" to "পোষণ", replace "ে" + "া" with "ো".
-   - Fix double E-kar (এ-কার): e.g., Change "সক্রিয়ভাবেে" to "সক্রিয়ভাবে".
-6. If the context does not contain the answer at all, say "দুঃখিত, এই বিষয়ে কোনো তথ্য ডকুমেন্টে পাওয়া যায়নি।"
-7. You MUST return exactly a valid JSON object matching this schema:
+1. DO NOT summarize, paraphrase, shorten, or rewrite the text in your own words. Keep the original sentence structure and words 100% identical to the context.
+2. DO NOT add any introductory or concluding conversational filler (e.g., "ডকুমেন্ট অনুযায়ী উত্তর নিচে দেওয়া হলো:").
+3. **DIRECT & COMPLETE ANSWER PRIORITY:** 
+   - If the user asks for a specific question, rule, or article (like "ধারা-২", "ধারা-৪", "প্রথম দফা কর্মসূচীর কাজ কয়টি ও কি কি?"), find the exact matching heading/question in the context and extract its FULL answer.
+   - NEVER truncate numbered lists or bullet points. If an answer has multiple points (১, ২, ৩...) or sub-sections (ক, খ, গ), you MUST include every single point verbatim.
+   - If the full answer spans across two chunks in the context, merge them seamlessly in the right numerical order.
+4. **Formatting:** Keep original numbering (১., ২., ৩. or ক., খ., গ.) and line breaks (\n) clean and readable.
+5. **SPELLING & ARTIFACT CORRECTION:** Only fix broken Bijoy-to-Unicode font conversion errors while keeping the actual words identical:
+   - Fix broken conjuncts: "সুসম্পনড়ব" -> "সুসম্পন্ন", "প্রশড়ব" -> "প্রশ্ন", "বিভিনড়ব" -> "বিভিন্ন", "অক্ষুনড়ব" -> "অক্ষুণ্ণ", "আলণ্টাহ" / "আলাহ" -> "আল্লাহ", "উলিখিত" -> "উল্লিখিত", "সিদ্ধাড়" -> "সিদ্ধান্ত"।
+   - Fix broken Reph (রেফ), O-kar ("ে" + "া" -> "ো"), and double E-kar ("েে" -> "ে").
+6. If the provided context does not contain the answer at all, return exactly:
+   "দুঃখিত, এই বিষয়ে কোনো তথ্য ডকুমেন্টে পাওয়া যায়নি।"
+7. You MUST return ONLY a valid JSON object matching this exact schema:
 {
-  "answer": "The exact extracted text here (with corrected spellings).",
-  "suggested_questions": ["Question 1?", "Question 2?", "Question 3?"]
+  "answer": "The exact, complete extracted text here with proper line breaks.",
+  "suggested_questions": ["প্রাসঙ্গিক প্রশ্ন ১?", "প্রাসঙ্গিক প্রশ্ন ২?", "প্রাসঙ্গিক প্রশ্ন ৩?"]
 }
-8. The 'suggested_questions' MUST be highly relevant follow-up questions. Keep them short and in the SAME language as the user's question. NEVER leave it empty.
+8. The 'suggested_questions' MUST be 3 short, direct questions taken directly from other topics/questions visible in the provided CONTEXT (in Bengali). NEVER leave it empty if an answer is found."""
 
-Return ONLY the raw JSON. Do not wrap in markdown code blocks."""
 
 class LLMService:
     def __init__(self):
         self.llm = ChatGroq(
             api_key=settings.GROQ_API_KEY,
-            # 🔴 মডেল নেম ঠিক করা হয়েছে (Groq-এ qwen3.8-27b নেই)
-            model="openai/gpt-oss-120b", 
-            # 🔴 temperature=0.0 করা হয়েছে যাতে মডেল একদম কঠোরভাবে প্রম্পট মানে
-            temperature=0.0, 
-            max_tokens=2000
+            model="openai/gpt-oss-120b",
+            temperature=0.0,
+            max_tokens=3500
         )
 
     async def generate_answer(self, query: str, context: str) -> dict:
-        if not context:
+        if not context or not context.strip():
             return {
                 "answer": "দুঃখিত, আপনার প্রশ্নের সাথে সম্পর্কিত কোনো তথ্য ডকুমেন্টে পাওয়া যায়নি।",
                 "suggested_questions": []
             }
 
+        # ইউজারের প্রশ্ন ও কন্টেক্সট ক্লিন করে নেওয়া হচ্ছে যাতে ভাঙা শব্দের কারণে মিসম্যাচ না হয়
+        clean_query = convert_bijoy_to_unicode(query.strip())
+        clean_context = convert_bijoy_to_unicode(context)
+
         human_prompt = f"""CONTEXT FROM DOCUMENTS:
-{context}
+{clean_context}
 
-USER QUESTION: {query}
+USER QUESTION: {clean_query}
 
-Extract the exact text from the context that answers the question."""
+Extract the exact and complete text from the context that answers the question. Return valid JSON only."""
 
         try:
             response = await self.llm.ainvoke([
@@ -63,13 +66,17 @@ Extract the exact text from the context that answers the question."""
 
             if not parsed_data or "answer" not in parsed_data:
                 return {
-                    "answer": raw_text, # Fallback if JSON fails
+                    "answer": convert_bijoy_to_unicode(raw_text),
                     "suggested_questions": []
                 }
 
+            # ফাইনাল আউটপুটে কোনো ভাঙা অক্ষর থাকলে তা আবারও ক্লিন করা হচ্ছে
+            final_answer = convert_bijoy_to_unicode(parsed_data.get("answer", "").strip())
+            suggested = parsed_data.get("suggested_questions", [])
+
             return {
-                "answer": parsed_data.get("answer", ""),
-                "suggested_questions": parsed_data.get("suggested_questions", [])
+                "answer": final_answer,
+                "suggested_questions": suggested if isinstance(suggested, list) else []
             }
 
         except Exception as e:

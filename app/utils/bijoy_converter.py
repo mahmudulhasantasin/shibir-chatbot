@@ -3,6 +3,92 @@
 import unicodeconverter as uc
 import re
 
+# PDF-এ থাকা কমন ফন্ট আর্টিফ্যাক্ট এবং ভাঙা যুক্তবর্ণের ডিকশনারি
+BROKEN_BANGLA_FIXES = {
+    "সুসম্পনড়ব": "সুসম্পন্ন",
+    "সম্পনড়ব": "সম্পন্ন",
+    "অক্ষুনড়ব": "অক্ষুণ্ণ",
+    "বিভিনড়ব": "বিভিন্ন",
+    "ছিনড়ব": "ছিন্ন",
+    "অবিচ্ছিনড়ব": "অবিচ্ছিন্ন",
+    "প্রশড়ব": "প্রশ্ন",
+    "উনড়বত": "উন্নত",
+    "উনড়বতি": "উন্নতি",
+    "স্বাস্থ্যোনড়বতি": "স্বাস্থ্যোন্নতি",
+    "নিমড়বমানের": "নিম্নমানের",
+    "প্রতিপনড়ব": "প্রতিপন্ন",
+    "সুনড়বাহ": "সুন্নাহ",
+    "জাহানড়বাম": "জাহান্নাম",
+    "জানড়বাত": "জান্নাত",
+    "তড়বক": "ত্মক",
+    "মারাতড়বক": "মারাত্মক",
+    "আতড়ব": "আত্ম",
+    "সংক্রাড়": "সংক্রান্ত",
+    "সিদ্ধাড়": "সিদ্ধান্ত",
+    "চক্রাড়": "চক্রান্ত",
+    "শত্রুতা ও চক্রান্ত": "শত্রুতা ও চক্রান্ত",
+    "একান্ত": "একান্ত",
+    "অত্যড়": "অত্যন্ত",
+    "পর্যড়": "পর্যন্ত",
+    "চূড়াড়": "চূড়ান্ত",
+    "জীবড়": "জীবন্ত",
+    "প্রাণবড়": "প্রাণবন্ত",
+    "অনড়": "অনন্ত",
+    "জ্বলন্ড": "জ্বলন্ত",
+    "চিরন": "চিরন্তন",
+    "চিরল্ডন": "চিরন্তন",
+    "সড়ন": "সন্তান",
+    "সাড়না": "সান্ত্বনা",
+    "আলাহ": "আল্লাহ",
+    "আলণ্টাহ": "আল্লাহ",
+    "আলণ্ডাহ": "আল্লাহ",
+    "আলণ্টণ্ডাহ": "আল্লাহ",
+    "আল-াহ": "আল্লাহ",
+    "আলাহর": "আল্লাহর",
+    "আলণ্টাহর": "আল্লাহর",
+    "আল-াহর": "আল্লাহর",
+    "রাসূলুলাহ": "রাসূলুল্লাহ",
+    "আব্দুলাহ": "আব্দুল্লাহ",
+    "উলিখিত": "উল্লিখিত",
+    "উলেখ": "উল্লেখ",
+    "উলেখ্য": "উল্লেখ্য",
+    "উলপ্টাস": "উল্লাস",
+    "উলণ্ঢাস": "উল্লাস",
+    "অশণ্টীল": "অশ্লীল",
+    "চুলণ্টী": "চুল্লী",
+    "সংরনাণ": "সংরক্ষণ",
+    "প্রশিণাণ": "প্রশিক্ষণ",
+    "লক্ষ্যণীয়": "লক্ষণীয়",
+    "পরিি": "পরি",
+    "বিন্রম": "বিনম্র",
+}
+
+def clean_unicode_artifacts(text: str) -> str:
+    if not text:
+        return text
+
+    # ১. জিরো-উইডথ স্পেস ও অতিরিক্ত কারেক্টার রিমুভ
+    text = text.replace("\u200b", "").replace("\u200c", "")
+
+    # ২. ভাঙা ও-কার (ে + া = ো) এবং ৌ-কার (ে + ৗ = ৌ) ফিক্স
+    text = re.sub(r"ে\s*া", "ো", text)
+    text = re.sub(r"ে\s*ৗ", "ৌ", text)
+
+    # ৩. ডাবল কার ফিক্স (িি -> ি, েে -> ে, াা -> া)
+    text = re.sub(r"([ািীুূৃেৈোৌ])\1+", r"\1", text)
+
+    # ৪. ভাঙা রেফ ফিক্স (যেমন: শিক্ষাথর্ী -> শিক্ষার্থী, কাযর্ -> কার্য)
+    text = re.sub(r"([ক-হড়ঢ়য়])([ািীুূৃেৈোৌ])র্", r"র্\1\2", text)
+
+    # ৫. আমাদের ডিকশনারির নির্দিষ্ট ভাঙা শব্দগুলো ফিক্স
+    for wrong, right in BROKEN_BANGLA_FIXES.items():
+        text = text.replace(wrong, right)
+
+    # ৬. সাধারণ প্যাটার্ন ফিক্স (নড়ব -> ন্ন)
+    text = text.replace("নড়ব", "ন্ন")
+
+    return text
+
 def convert_bijoy_to_unicode(text: str) -> str:
     if not text:
         return text
@@ -16,32 +102,18 @@ def convert_bijoy_to_unicode(text: str) -> str:
             converted_lines.append(line)
             continue
         
-        if any('\u0600' <= c <= '\u06FF' for c in line):
-            converted_lines.append(line)
-            continue
-        
+        # যদি ইউনিকোড বাংলা অলরেডি থাকে, তাহলে বিজয় কনভার্টার না চালিয়ে শুধু ক্লিনিং চালাব
+        has_unicode_bangla = any('\u0980' <= c <= '\u09FF' for c in line)
         trigger_count = sum(1 for c in line if c in bijoy_triggers)
         
-        if trigger_count < 2:
-            converted_lines.append(line)
-        else:
+        if not has_unicode_bangla and trigger_count >= 2:
             try:
-                # ১. মূল কনভার্শন
-                converted = uc.convert_bijoy_to_unicode(line)
-                
-                # ২. কিছু সাধারণ ভুল অটো-ফিক্স করা (Post-processing)
-                converted = converted.replace("¯‥", "স্ক")
-                converted = converted.replace("িি", "ি")
-                converted = converted.replace("ে", "ে") # fix double e-kar
-                converted = converted.replace("র্ী", "র্ী")
-                converted = converted.replace("\u200b", "") # remove zero-width space
-                
-                # কিছু অদ্ভুত আর্টিফ্যাক্ট ফিক্স
-                converted = converted.replace("পরিি", "পরি")
-                converted = converted.replace("বিন্রম", "বিনম্র")
-                
-                converted_lines.append(converted)
+                line = uc.convert_bijoy_to_unicode(line)
             except Exception:
-                converted_lines.append(line)
+                pass
+        
+        # সব লাইনের জন্যই ইউনিকোড আর্টিফ্যাক্ট ক্লিনার চালানো হবে
+        cleaned_line = clean_unicode_artifacts(line)
+        converted_lines.append(cleaned_line)
     
     return '\n'.join(converted_lines)
