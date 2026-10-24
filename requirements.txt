@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+qdrant-client
+langchain-core
+langchain-groq
+pydantic
+python-dotenv
+unicodeconverter
+pymupdf
+langchain-text-splitters
