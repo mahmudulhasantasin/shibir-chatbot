@@ -12,7 +12,7 @@ class QdrantService:
         self.collection = settings.COLLECTION_NAME
         self.model = settings.EMBEDDING_MODEL
 
-    def search_context(self, query: str, limit: int = 4) -> str: # limit 2 theke 1 koro
+    def search_context(self, query: str, limit: int = 6) -> str: # limit 2 theke 1 koro
         try:
             search_result = self.client.query_points(
                 collection_name=self.collection,
