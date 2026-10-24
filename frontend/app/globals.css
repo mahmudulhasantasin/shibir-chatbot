@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Light Theme Variables */
+  --bg-primary: #f8fafc;
+  --bg-card: #ffffff;
+  --text-primary: #0f172a;
+  --text-primary-rgb: 15, 23, 42;
+  --text-muted: #64748b;
+  --accent-solid: #4f46e5;
+  --accent-contrast: #ffffff;
+}
+
+.dark,
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Dark Theme Variables */
+    --bg-primary: #090d16;
+    --bg-card: #131b2e;
+    --text-primary: #f1f5f9;
+    --text-primary-rgb: 241, 245, 249;
+    --text-muted: #94a3b8;
+    --accent-solid: #6366f1;
+    --accent-contrast: #ffffff;
+  }
+}
+
+/* Subtle animation for incoming messages */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s ease-out forwards;
+}
+
+/* Custom scrollbar for clean UI */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(150, 150, 150, 0.2);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(150, 150, 150, 0.4);
+}
