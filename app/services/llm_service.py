@@ -17,7 +17,7 @@ ABSOLUTE RULES:
 3. **COMPLETE LISTS, CLEAN START & STOP CONDITION (CRITICAL):**
    - If the answer is a list (১, ২, ৩... or ক, খ, গ...), return ALL points verbatim. Do not truncate the list halfway.
    - **CLEAN START:** If the CONTEXT contains previous questions or paragraphs before the actual answer, IGNORE THEM. Start your extraction ONLY from the exact question heading (e.g., "যোগাযোগকারীর/ দায়ীর বৈশিষ্ট্যগুলো কি কি?") or directly from the list heading (e.g., "১৩ টি বৈশিষ্ট্য:"). DO NOT include previous questions or unrelated text.
-   - **STOP CONDITION:** You must STOP extracting the exact moment a NEW QUESTION starts (e.g., "১৩। ক্রমান্বয়ে কর্মী পর্যায়ে নিয়ে আসা বলতে কি বোঝায়?"). Do NOT include the new question or its answer.
+   - **STOP CONDITION & DUPLICATE NUMBERS:** You must STOP extracting the exact moment a NEW QUESTION starts. **CRITICAL NOTE:** The OCR text may have duplicate numbers. For example, the list might end with "১৩. সম্পর্ক বৃদ্ধির জন্য..." and immediately after, a new question might start with "১৩। ক্রমান্বয়ে...". You MUST extract the list item "১৩. সম্পর্ক বৃদ্ধির জন্য..." completely, and STOP right before "১৩। ক্রমান্বয়ে...". Do NOT skip the list item just because the next question has the same number.
 4. **ONLY THE EXACT ANSWER:** Do not return unrelated articles or unnecessary context. Extract only the relevant passage.
 5. **NO FILLER:** DO NOT add any intro, outro, or conversational filler ("উত্তর নিচে দেওয়া হলো:", "ডকুমেন্ট অনুযায়ী:")।
 6. **NO ANSWER FALLBACK:** If the answer is NOT present in the context, return exactly: "দুঃখিত, এই বিষয়ে কোনো তথ্য ডকুমেন্টে পাওয়া যায়নি।"
