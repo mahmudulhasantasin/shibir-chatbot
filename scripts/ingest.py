@@ -9,7 +9,7 @@ import sys
 import time
 import asyncio
 import hashlib
-import re  # ★ নতুন যোগ করা হয়েছে
+import re
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -110,7 +110,6 @@ async def ocr_pdf(pdf_path: Path) -> list[dict]:
         if txt_path.exists():
             raw_text = txt_path.read_text(encoding="utf-8")
             text = clean_ocr_text(raw_text)
-            # ক্লিন করা টেক্সট আবার সেভ করে রাখছি, যাতে পরবর্তীতে আর ক্লিন করতে না হয়
             txt_path.write_text(text, encoding="utf-8") 
             print(f"   [CACHE+CLEAN] page {i + 1:03d}/{len(doc):03d}  ({len(text)} chars)")
         else:
@@ -153,14 +152,13 @@ def page_at(offsets, pos: int) -> int:
 # 3) Chunking
 # =====================================================
 def chunk_all(full_text: str, offsets):
+    # ★ এখানে পরিবর্তন করা হয়েছে: সাইজ বাড়ানো হয়েছে এবং ১। ২। সেপারেটর সরানো হয়েছে
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=300,
+        chunk_size=1500,     # ★ ১০০০ থেকে বাড়িয়ে ১৫০০ করা হলো
+        chunk_overlap=400,   # ★ ৩০০ থেকে বাড়িয়ে ৪০০ করা হলো
         keep_separator=True,
         separators=[
             "\nধারা-",
-            "\n১।", "\n২।", "\n৩।", "\n৪।", "\n৫।",
-            "\n৬।", "\n৭।", "\n৮।", "\n৯।",
             "\nপ্রশ্ন", "\nউত্তর",
             "\n\n", "\n", "। ", " ", "",
         ],
