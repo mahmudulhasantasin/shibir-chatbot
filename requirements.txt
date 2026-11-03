@@ -5,6 +5,6 @@ langchain-core
 langchain-groq
 pydantic
 python-dotenv
-unicodeconverter
 pymupdf
 langchain-text-splitters
+chrome_lens_py

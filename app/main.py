@@ -2,12 +2,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.chat import router as chat_router
 
-app = FastAPI(title="Shibir PDF Chatbot API") # ✅ এই লাইনটা থাকতে হবে
+app = FastAPI(title="Shibir PDF Chatbot API")
 
-# CORS সেটআপ
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

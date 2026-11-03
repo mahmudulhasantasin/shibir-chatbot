@@ -1,188 +1,271 @@
+# scripts/ingest.py
+"""
+Full OCR pipeline:
+  PDF → page image (300 DPI) → OCR → per-page txt → chunk → Qdrant
+Collection name: "shibir-member" (same as before)
+"""
 import os
-import re
-import hashlib
-import glob
-import time
 import sys
+import time
+import asyncio
+import hashlib
+import re  # ★ নতুন যোগ করা হয়েছে
+from pathlib import Path
+
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient, models
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(base_dir)
+# ---- chrome_lens_py (OCR engine) ----
+try:
+    from chrome_lens_py import LensAPI
+except ImportError:
+    LensAPI = None
+    print("⚠️  chrome_lens_py not installed. Run: pip install chrome_lens_py")
 
-from app.utils.bijoy_converter import convert_bijoy_to_unicode
-
-env_path = os.path.join(base_dir, ".env")
-load_dotenv(env_path)
+# ---- paths / env ----
+base_dir = Path(__file__).resolve().parent.parent
+sys.path.append(str(base_dir))
+load_dotenv(base_dir / ".env")
 
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+COLLECTION = "shibir-member"
+VECTOR_SIZE = 384
+EMBED_MODEL = "intfloat/multilingual-e5-small"
 
-COLLECTION_NAME = "shibir-member"
-VECTOR_SIZE = 384  # intfloat/multilingual-e5-small
+DOCUMENTS_DIR = base_dir / "documents"
+OCR_DIR = DOCUMENTS_DIR / "ocr_output"
+OCR_DIR.mkdir(parents=True, exist_ok=True)
 
 if not QDRANT_URL or not QDRANT_API_KEY:
-    raise ValueError("[ERROR] QDRANT_URL or QDRANT_API_KEY not found in .env file!")
+    raise ValueError("[ERROR] QDRANT_URL or QDRANT_API_KEY missing in .env")
 
 client = QdrantClient(
-    url=QDRANT_URL, 
-    api_key=QDRANT_API_KEY, 
+    url=QDRANT_URL,
+    api_key=QDRANT_API_KEY,
     cloud_inference=True,
-    timeout=120.0
+    timeout=180.0,
 )
 
-def generate_chunk_id(source: str, index: int, text: str) -> str:
-    """ইউনিক MD5 হ্যাশ আইডি"""
-    raw = f"{source}_{index}_{text}"
-    return hashlib.md5(raw.encode('utf-8')).hexdigest()
 
-def setup_collection():
-    """পুরনো কালেকশন ডিলিট করে নতুন কালেকশন ও টেক্সট ইনডেক্স তৈরি করে"""
-    if client.collection_exists(COLLECTION_NAME):
-        client.delete_collection(COLLECTION_NAME)
-        print(f"[INFO] Deleted existing collection: {COLLECTION_NAME}")
+# =====================================================
+# 1) OCR & Text Cleaning
+# =====================================================
+def clean_ocr_text(text: str) -> str:
+    """OCR থেকে আসা এলোমেলো লাইন ব্রেক এবং বুলেট পয়েন্টগুলো ঠিক করে"""
+    if not text:
+        return text
+    
+    # ১. বুলেট পয়েন্টের (•, *, -) আগে নতুন লাইন যোগ করা
+    text = re.sub(r'(?<!\n)\s*([•\*])\s*', r'\n\1 ', text)
+    
+    # ২. বাংলা সংখ্যার (১. ২. ৩. বা ১। ২।) আগে নতুন লাইন যোগ করা
+    text = re.sub(r'(?<!\n)\s+(?=[০-৯]+[।\.])', '\n', text)
+    
+    # ৩. ইংরেজি সংখ্যার (1. 2. 3.) আগে নতুন লাইন যোগ করা
+    text = re.sub(r'(?<!\n)\s+(?=\d+\.\s)', '\n', text)
+    
+    # ৪. অতিরিক্ত স্পেস বা খালি লাইন পরিষ্কার করা
+    text = re.sub(r'\n\s*\n', '\n\n', text)
+    
+    return text.strip()
+
+
+def render_page(doc, i: int, dpi: int = 300) -> Path:
+    """Render page i (0-indexed) to PNG at given DPI."""
+    page = doc[i]
+    zoom = dpi / 72.0
+    mat = fitz.Matrix(zoom, zoom)
+    pix = page.get_pixmap(matrix=mat, alpha=False)
+    out = OCR_DIR / f"page_{i + 1:03d}.png"
+    pix.save(str(out))
+    return out
+
+
+async def ocr_page(api, img_path: Path) -> str:
+    """
+    Run OCR on a single page image.
+    'bn' code on Chrome Lens handles mixed Bangla + Arabic + English.
+    """
+    try:
+        res = await api.process_image(image_path=str(img_path), ocr_language="bn")
+        return (res.get("ocr_text") or "").strip()
+    except Exception as e:
+        print(f"   [OCR FAIL] {img_path.name}: {e}")
+        return ""
+
+
+async def ocr_pdf(pdf_path: Path) -> list[dict]:
+    """OCR every page. Returns [{'page': n, 'text': str}, ...]."""
+    doc = fitz.open(pdf_path)
+    api = LensAPI()
+    pages = []
+
+    for i in range(len(doc)):
+        txt_path = OCR_DIR / f"page_{i + 1:03d}.txt"
         
-    client.create_collection(
-        collection_name=COLLECTION_NAME,
-        vectors_config=models.VectorParams(
-            size=VECTOR_SIZE, 
-            distance=models.Distance.COSINE
-        )
+        # ★ CACHE LOGIC: যদি txt ফাইল আগেই থাকে, তবে আর OCR করবে না, সোজা পড়ে নেবে
+        if txt_path.exists():
+            raw_text = txt_path.read_text(encoding="utf-8")
+            text = clean_ocr_text(raw_text)
+            # ক্লিন করা টেক্সট আবার সেভ করে রাখছি, যাতে পরবর্তীতে আর ক্লিন করতে না হয়
+            txt_path.write_text(text, encoding="utf-8") 
+            print(f"   [CACHE+CLEAN] page {i + 1:03d}/{len(doc):03d}  ({len(text)} chars)")
+        else:
+            img = render_page(doc, i)
+            raw_text = await ocr_page(api, img)
+            text = clean_ocr_text(raw_text)
+            txt_path.write_text(text, encoding="utf-8")
+            print(f"   [OCR+CLEAN] page {i + 1:03d}/{len(doc):03d}  ({len(text)} chars)")
+            
+        pages.append({"page": i + 1, "text": text})
+
+    doc.close()
+    return pages
+
+
+# =====================================================
+# 2) Document reconstruction
+# =====================================================
+def reconstruct(pages: list[dict]):
+    """Join pages with '\\n\\n' and build offset → page map."""
+    full, offsets, cur = [], [], 0
+    for p in pages:
+        offsets.append((cur, p["page"]))
+        full.append(p["text"])
+        cur += len(p["text"]) + 2
+    return "\n\n".join(full), offsets
+
+
+def page_at(offsets, pos: int) -> int:
+    page = 1
+    for off, p in offsets:
+        if pos >= off:
+            page = p
+        else:
+            break
+    return page
+
+
+# =====================================================
+# 3) Chunking
+# =====================================================
+def chunk_all(full_text: str, offsets):
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=300,
+        keep_separator=True,
+        separators=[
+            "\nধারা-",
+            "\n১।", "\n২।", "\n৩।", "\n৪।", "\n৫।",
+            "\n৬।", "\n৭।", "\n৮।", "\n৯।",
+            "\nপ্রশ্ন", "\nউত্তর",
+            "\n\n", "\n", "। ", " ", "",
+        ],
     )
-    # ✅ ডিরেক্ট টেক্সট সার্চের (Exact Match) জন্য Full-Text Index তৈরি করা হচ্ছে
+
+    chunks, search_pos = [], 0
+    for idx, ch in enumerate(splitter.split_text(full_text)):
+        ch = ch.strip()
+        if not ch:
+            continue
+        found = full_text.find(ch[:60], search_pos)
+        if found != -1:
+            search_pos = found
+        chunks.append({
+            "text": ch,
+            "page": page_at(offsets, search_pos),
+            "idx": idx,
+        })
+    return chunks
+
+
+# =====================================================
+# 4) Qdrant
+# =====================================================
+def setup_collection():
+    """Delete old collection (dirty data) and recreate with text index."""
+    if client.collection_exists(COLLECTION):
+        client.delete_collection(COLLECTION)
+        print(f"[SETUP] Deleted old collection: {COLLECTION}")
+
+    client.create_collection(
+        collection_name=COLLECTION,
+        vectors_config=models.VectorParams(
+            size=VECTOR_SIZE,
+            distance=models.Distance.COSINE,
+        ),
+    )
     client.create_payload_index(
-        collection_name=COLLECTION_NAME,
+        collection_name=COLLECTION,
         field_name="text",
         field_schema=models.TextIndexParams(
             type="text",
             tokenizer=models.TokenizerType.MULTILINGUAL,
             min_token_len=2,
-            lowercase=True
-        )
+            lowercase=True,
+        ),
     )
-    print(f"[SUCCESS] Created new clean collection with Text Index: {COLLECTION_NAME}")
+    print(f"[SETUP] Fresh collection ready: {COLLECTION}")
 
-def ingest_documents():
-    documents_dir = os.path.join(base_dir, "documents")
-    pdf_files = glob.glob(os.path.join(documents_dir, "*.pdf"))
-    
-    if not pdf_files:
-        print(f"[WARNING] No PDF files found in: {documents_dir}")
+
+def make_id(source: str, idx: int, text: str) -> str:
+    return hashlib.md5(f"{source}_{idx}_{text}".encode("utf-8")).hexdigest()
+
+
+# =====================================================
+# 5) Main
+# =====================================================
+async def main():
+    pdfs = sorted(DOCUMENTS_DIR.glob("*.pdf"))
+    if not pdfs:
+        print(f"[ERROR] No PDFs found in: {DOCUMENTS_DIR}")
         return
 
-    print(f"[INFO] Found {len(pdf_files)} PDF files. Starting processing...")
-
-    # ✅ প্রশ্নোত্তর ও ধারার সীমানা অক্ষুণ্ণ রেখে চাঙ্কিং করার কাস্টম সেপারেটর
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000, 
-        chunk_overlap=300,
-        separators=[
-            "\nধারা-", 
-            "\n১।", "\n২।", "\n৩।", "\n৪।", "\n৫।", "\n৬।", "\n৭।", "\n৮।", "\n৯।",
-            "\n\n", 
-            "\n", 
-            "। ", 
-            " ", 
-            ""
-        ],
-        keep_separator=True
-    )
+    print(f"[INFO] Found {len(pdfs)} PDF(s)")
+    setup_collection()
 
     all_points = []
 
-    for pdf_path in pdf_files:
-        filename = os.path.basename(pdf_path)
-        print(f"\n[INFO] Reading: {filename}")
-        
-        try:
-            doc = fitz.open(pdf_path)
-            total_pages = len(doc)
-            
-            # ১. পুরো PDF-এর টেক্সট একসাথে জোড়া লাগানো হচ্ছে যাতে পাতার মাঝখানে উত্তর কেটে না যায়
-            full_doc_text = []
-            page_char_offsets = []  # কোন ক্যারেক্টার কত নম্বর পাতায় তা ট্র্যাক করার জন্য
-            current_offset = 0
+    for pdf in pdfs:
+        print(f"\n[PDF] {pdf.name}")
+        pages = await ocr_pdf(pdf)
+        full, offsets = reconstruct(pages)
+        chunks = chunk_all(full, offsets)
+        print(f"   → {len(chunks)} chunks from {len(pages)} pages")
 
-            for page_num in range(total_pages):
-                raw_text = doc[page_num].get_text("text")
-                if not raw_text or not raw_text.strip():
-                    continue
-
-                # পাতার নিচে থাকা শুধু পৃষ্ঠা নম্বর যেমন (3), ( 12 ) মুছে ফেলা হচ্ছে যাতে উত্তর না ভাঙে
-                cleaned_page = convert_bijoy_to_unicode(raw_text)
-                cleaned_page = re.sub(r"\n\s*\(?\s*[০-৯0-9]+\s*\)?\s*$", "", cleaned_page.strip())
-
-                page_char_offsets.append((current_offset, page_num + 1))
-                full_doc_text.append(cleaned_page)
-                current_offset += len(cleaned_page) + 2  # +2 for "\n\n"
-
-            combined_text = "\n\n".join(full_doc_text)
-            chunks = text_splitter.split_text(combined_text)
-
-            # প্রতিটি চাঙ্কের আনুমানিক পেজ নম্বর বের করা ও পয়েন্ট তৈরি করা
-            search_pos = 0
-            for idx, chunk in enumerate(chunks):
-                chunk = chunk.strip()
-                if not chunk:
-                    continue
-
-                pos = combined_text.find(chunk[:50], search_pos)
-                if pos != -1:
-                    search_pos = pos
-
-                page_no = 1
-                for offset, p_num in page_char_offsets:
-                    if pos >= offset:
-                        page_no = p_num
-                    else:
-                        break
-
-                chunk_id = generate_chunk_id(filename, idx, chunk)
-                
-                point = models.PointStruct(
-                    id=chunk_id,
+        for ch in chunks:
+            all_points.append(
+                models.PointStruct(
+                    id=make_id(pdf.name, ch["idx"], ch["text"]),
                     vector=models.Document(
-                        text=f"passage: {chunk}", 
-                        model="intfloat/multilingual-e5-small"
+                        text=f"passage: {ch['text']}",
+                        model=EMBED_MODEL,
                     ),
                     payload={
-                        "text": chunk,
-                        "source": filename,
-                        "page": page_no,
-                        "chunk_index": idx
-                    }
+                        "text": ch["text"],
+                        "source": pdf.name,
+                        "page": ch["page"],
+                        "chunk_index": ch["idx"],
+                    },
                 )
-                all_points.append(point)
-            
-            print(f"   ... Extracted {len(chunks)} clean chunks from {total_pages} pages.")
-            doc.close()
-                    
-        except Exception as e:
-            print(f"[ERROR] Failed to process {filename}: {e}")
+            )
 
     if not all_points:
-        print("[WARNING] No text chunks were generated.")
+        print("[WARNING] No chunks generated.")
         return
 
-    print(f"\n[INFO] Total {len(all_points)} chunks will be uploaded to Qdrant...")
+    print(f"\n[UPLOAD] {len(all_points)} points → {COLLECTION}")
+    batch = 50
+    for i in range(0, len(all_points), batch):
+        client.upsert(collection_name=COLLECTION, points=all_points[i:i + batch])
+        print(f"   [OK] {min(i + batch, len(all_points))}/{len(all_points)}")
+        time.sleep(0.4)
 
-    batch_size = 50
-    for i in range(0, len(all_points), batch_size):
-        batch = all_points[i:i+batch_size]
-        try:
-            client.upsert(collection_name=COLLECTION_NAME, points=batch)
-            print(f"   [SUCCESS] Uploaded: {min(i+batch_size, len(all_points))} / {len(all_points)}")
-            time.sleep(0.5) 
-        except Exception as e:
-            print(f"   [ERROR] Batch upload failed: {e}. Retrying in 5s...")
-            time.sleep(5)
-            client.upsert(collection_name=COLLECTION_NAME, points=batch)
-            print(f"   [SUCCESS on RETRY] Uploaded: {min(i+batch_size, len(all_points))} / {len(all_points)}")
+    print(f"\n[SUCCESS] All data saved to Qdrant.")
 
-    print(f"\n[SUCCESS] All data successfully saved to Qdrant!")
 
 if __name__ == "__main__":
-    setup_collection()
-    ingest_documents()
+    asyncio.run(main())
