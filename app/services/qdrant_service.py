@@ -63,7 +63,7 @@ class QdrantService:
             if not combined:
                 return ""
 
-            # ★ ৪. Context Expansion (শুধুমাত্র টপ ১টি রেজাল্টের আগের ও পরের চাঙ্ক আনবো)
+            # ★ ৪. Context Expansion (শুধুমাত্র পরের +1 এবং +2 চাঙ্ক আনবো, আগের -1 বাদ দিলাম)
             expanded_hits = list(combined)
             
             if combined: 
@@ -71,11 +71,9 @@ class QdrantService:
                 source = top_hit.payload.get("source", "")
                 current_idx = top_hit.payload.get("chunk_index", 0)
                 
-                for offset in [-1, 1]:  # -1 (আগের চাঙ্ক) এবং +1 (পরের চাঙ্ক)
+                for offset in [1, 2]:  # ★ -1 বাদ, শুধু পরের ২টি চাঙ্ক খুঁজবো
                     neighbor_idx = current_idx + offset
-                    if neighbor_idx < 0:
-                        continue
-                        
+                    
                     # চেক করা: এই চাঙ্কটা কি লিস্টে আগেই আছে?
                     if any(h.payload.get("source") == source and h.payload.get("chunk_index") == neighbor_idx for h in expanded_hits):
                         continue
