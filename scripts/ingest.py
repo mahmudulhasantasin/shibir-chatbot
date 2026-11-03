@@ -152,10 +152,9 @@ def page_at(offsets, pos: int) -> int:
 # 3) Chunking
 # =====================================================
 def chunk_all(full_text: str, offsets):
-    # ★ এখানে পরিবর্তন করা হয়েছে: সাইজ বাড়ানো হয়েছে এবং ১। ২। সেপারেটর সরানো হয়েছে
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1500,     # ★ ১০০০ থেকে বাড়িয়ে ১৫০০ করা হলো
-        chunk_overlap=400,   # ★ ৩০০ থেকে বাড়িয়ে ৪০০ করা হলো
+        chunk_size=3000,     # ★ ১৫০০ থেকে বাড়িয়ে ৩০০০ করা হলো (পুরো লিস্ট একসাথে রাখার জন্য)
+        chunk_overlap=500,   # ★ ওভারল্যাপও বাড়ানো হলো
         keep_separator=True,
         separators=[
             "\nধারা-",
@@ -196,6 +195,7 @@ def setup_collection():
             distance=models.Distance.COSINE,
         ),
     )
+    # ★ টেক্সট ইনডেক্স
     client.create_payload_index(
         collection_name=COLLECTION,
         field_name="text",
@@ -206,7 +206,18 @@ def setup_collection():
             lowercase=True,
         ),
     )
-    print(f"[SETUP] Fresh collection ready: {COLLECTION}")
+    # ★ নতুন যোগ করা সোর্স এবং চাঙ্ক ইনডেক্স (পরের চাঙ্ক খুঁজতে কাজে লাগবে)
+    client.create_payload_index(
+        collection_name=COLLECTION,
+        field_name="source",
+        field_schema=models.PayloadSchemaType.KEYWORD,
+    )
+    client.create_payload_index(
+        collection_name=COLLECTION,
+        field_name="chunk_index",
+        field_schema=models.PayloadSchemaType.INTEGER,
+    )
+    print(f"[SETUP] Fresh collection ready with indexes: {COLLECTION}")
 
 
 def make_id(source: str, idx: int, text: str) -> str:

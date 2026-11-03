@@ -13,13 +13,13 @@ class QdrantService:
         self.collection = settings.COLLECTION_NAME
         self.model = settings.EMBEDDING_MODEL
 
-    def search_context(self, query: str, limit: int = 10) -> str:
+    def search_context(self, query: str, limit: int = 15) -> str:
         try:
             clean_query = query.strip()
             if not clean_query:
                 return ""
 
-            # ১. Exact Keyword / Phrase Search (hybrid)
+            # ১. Exact Keyword / Phrase Search
             exact_hits = []
             try:
                 scroll_res, _ = self.client.scroll(
@@ -63,38 +63,43 @@ class QdrantService:
             if not combined:
                 return ""
 
-            # ★ ৪. Next Chunk Fetching (পরের পেজের চাঙ্ক আনা)
-            # সার্চ রেজাল্টের টপ ৩টি চাঙ্কের "পরবর্তী" চাঙ্কগুলোও খুঁজে আনি (যাতে পেজ কাটা না যায়)
-            top_hits = combined[:3]
+            # ★ ৪. Context Expansion (আগের -1 এবং পরের +1 চাঙ্ক আনা)
             expanded_hits = list(combined)
-
-            for top_hit in top_hits:
+            
+            for top_hit in combined[:3]:  # টপ ৩টি রেজাল্টের পাশের চাঙ্কগুলো খুঁজবো
                 source = top_hit.payload.get("source", "")
                 current_idx = top_hit.payload.get("chunk_index", 0)
-                next_idx = current_idx + 1
+                
+                for offset in [-1, 1]:  # -1 (আগের চাঙ্ক) এবং +1 (পরের চাঙ্ক)
+                    neighbor_idx = current_idx + offset
+                    if neighbor_idx < 0:
+                        continue
+                        
+                    # চেক করা: এই চাঙ্কটা কি লিস্টে আগেই আছে?
+                    if any(h.payload.get("source") == source and h.payload.get("chunk_index") == neighbor_idx for h in expanded_hits):
+                        continue
 
-                # যদি এই পরের চাঙ্কটা আগে থেকেই লিস্টে না থাকে, তবে খুঁজে আনি
-                if not any(h.payload.get("source") == source and h.payload.get("chunk_index") == next_idx for h in expanded_hits):
                     try:
-                        next_res, _ = self.client.scroll(
+                        neighbor_res, _ = self.client.scroll(
                             collection_name=self.collection,
                             scroll_filter=models.Filter(
                                 must=[
                                     models.FieldCondition(key="source", match=models.MatchValue(value=source)),
-                                    models.FieldCondition(key="chunk_index", match=models.MatchValue(value=next_idx)),
+                                    models.FieldCondition(key="chunk_index", match=models.MatchValue(value=neighbor_idx)),
                                 ]
                             ),
                             limit=1,
                         )
-                        if next_res:
-                            expanded_hits.append(next_res[0])
+                        if neighbor_res:
+                            expanded_hits.append(neighbor_res[0])
+                            print(f"[CONTEXT EXPANSION] Fetched chunk {neighbor_idx} from {source}")
                     except Exception as e:
-                        print(f"[NEXT CHUNK ERROR] {e}")
+                        print(f"[CONTEXT EXPANSION ERROR] {e}")
 
             # ★ ৫. সিরিয়ালি সাজানো (Sort by chunk_index)
             expanded_hits.sort(key=lambda x: x.payload.get("chunk_index", 0))
 
-            # ডুপ্লিকেট রিমুভ করা (যদি থাকে)
+            # ডুপ্লিকেট রিমুভ করা
             final_hits = []
             final_seen = set()
             for h in expanded_hits:
