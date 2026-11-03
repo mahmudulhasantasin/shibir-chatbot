@@ -13,7 +13,7 @@ class QdrantService:
         self.collection = settings.COLLECTION_NAME
         self.model = settings.EMBEDDING_MODEL
 
-    def search_context(self, query: str, limit: int = 15) -> str:
+    def search_context(self, query: str, limit: int = 4) -> str:
         try:
             clean_query = query.strip()
             if not clean_query:
@@ -32,7 +32,7 @@ class QdrantService:
                             )
                         ]
                     ),
-                    limit=3,
+                    limit=2,
                 )
                 exact_hits = scroll_res
             except Exception:
@@ -63,10 +63,11 @@ class QdrantService:
             if not combined:
                 return ""
 
-            # ★ ৪. Context Expansion (আগের -1 এবং পরের +1 চাঙ্ক আনা)
+            # ★ ৪. Context Expansion (শুধুমাত্র টপ ১টি রেজাল্টের আগের ও পরের চাঙ্ক আনবো)
             expanded_hits = list(combined)
             
-            for top_hit in combined[:3]:  # টপ ৩টি রেজাল্টের পাশের চাঙ্কগুলো খুঁজবো
+            if combined: 
+                top_hit = combined[0]
                 source = top_hit.payload.get("source", "")
                 current_idx = top_hit.payload.get("chunk_index", 0)
                 
@@ -107,7 +108,10 @@ class QdrantService:
                     final_seen.add(h.id)
                     final_hits.append(h)
 
-            # ৬. LLM-এর জন্য context arrange
+            # ★ ৬. সর্বোচ্চ ৫টি চাঙ্ক রাখবো (Groq API-এর টোকেন লিমিট বাঁচাতে)
+            final_hits = final_hits[:5]
+
+            # ৭. LLM-এর জন্য context arrange
             parts = []
             for hit in final_hits:
                 text = hit.payload.get("text", "").strip()
