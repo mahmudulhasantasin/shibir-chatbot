@@ -152,9 +152,10 @@ def page_at(offsets, pos: int) -> int:
 # 3) Chunking
 # =====================================================
 def chunk_all(full_text: str, offsets):
+    # ★ এখানে চাঙ্ক সাইজ ৮০০০ করা হয়েছে যাতে লম্বা লিস্টও একসাথে থাকে
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=3000,     # ★ ১৫০০ থেকে বাড়িয়ে ৩০০০ করা হলো (পুরো লিস্ট একসাথে রাখার জন্য)
-        chunk_overlap=500,   # ★ ওভারল্যাপও বাড়ানো হলো
+        chunk_size=8000,     # ★ ৩০০০ থেকে বাড়িয়ে ৮০০০ করা হলো
+        chunk_overlap=1000,  # ★ ৫০০ থেকে বাড়িয়ে ১০০০ করা হলো
         keep_separator=True,
         separators=[
             "\nধারা-",

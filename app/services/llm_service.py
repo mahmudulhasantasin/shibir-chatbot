@@ -27,7 +27,8 @@ ABSOLUTE RULES:
 }
 """
 
-MODELS = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+# ★ সবচেয়ে স্মার্ট মডেলটি সবার আগে রাখা হলো
+MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
 
 
 class LLMService:
@@ -47,7 +48,6 @@ class LLMService:
                 return await llm.ainvoke(messages)
             except Exception as e:
                 last_exception = e
-                # If rate limit (429) or temporary error, try fallback model
                 print(f"[LLM Warning] Model {model_name} failed: {e}. Trying fallback...")
                 continue
         raise last_exception or RuntimeError("All LLM models failed.")
@@ -58,8 +58,11 @@ class LLMService:
                 "answer": "দুঃখিত, আপনার প্রশ্নের সাথে সম্পর্কিত কোনো তথ্য ডকুমেন্টে পাওয়া যায়নি।"
             }
 
-        # ★ এখানে আর কোনো জোর করে কন্টেক্সট কাটা (Truncation) নেই। 
-        # কন্টেক্সট ছোট রাখার দায়িত্ব qdrant_service.py-এর।
+        # ★ Safety Check: Groq API Limit (Max 8000 tokens) এড়াতে কন্টেক্সট ছোট করা
+        MAX_CHARS = 16000  
+        if len(context) > MAX_CHARS:
+            print(f"[WARNING] Context too large ({len(context)} chars). Truncating to {MAX_CHARS} chars.")
+            context = context[:MAX_CHARS]
 
         human_prompt = f"""CONTEXT:
 {context}
@@ -90,10 +93,10 @@ Return valid JSON only with the 'answer' key."""
             verified = verify_extractive(candidate, context)
 
             if verified is None:
-                # LLM rewrote/hallucinated → fallback to raw first paragraph
-                first_block = context.split("\n\n---\n\n")[0].strip()
+                # ★ আগের মতো first_block (ভুল টেক্সট) না দিয়ে সরাসরি মেসেজ দেওয়া হলো
+                print("[WARNING] Verification failed. LLM might have hallucinated.")
                 return {
-                    "answer": first_block or "দুঃখিত, এই বিষয়ে কোনো তথ্য ডকুমেন্টে পাওয়া যায়নি।"
+                    "answer": "দুঃখিত, সঠিক উত্তরটি খুঁজে পাওয়া যায়নি। দয়া করে প্রশ্নটি অন্যভাবে করুন।"
                 }
 
             return {

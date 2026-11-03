@@ -13,7 +13,7 @@ class QdrantService:
         self.collection = settings.COLLECTION_NAME
         self.model = settings.EMBEDDING_MODEL
 
-    def search_context(self, query: str, limit: int = 4) -> str:
+    def search_context(self, query: str, limit: int = 2) -> str:
         try:
             clean_query = query.strip()
             if not clean_query:
@@ -63,7 +63,7 @@ class QdrantService:
             if not combined:
                 return ""
 
-            # ★ ৪. Context Expansion (শুধুমাত্র পরের +1 এবং +2 চাঙ্ক আনবো, আগের -1 বাদ দিলাম)
+            # ★ ৪. Context Expansion (শুধুমাত্র পরের +1 চাঙ্ক আনবো, আগের -1 বাদ)
             expanded_hits = list(combined)
             
             if combined: 
@@ -71,7 +71,7 @@ class QdrantService:
                 source = top_hit.payload.get("source", "")
                 current_idx = top_hit.payload.get("chunk_index", 0)
                 
-                for offset in [1, 2]:  # ★ -1 বাদ, শুধু পরের ২টি চাঙ্ক খুঁজবো
+                for offset in [1]:  # ★ শুধু পরের ১টি চাঙ্ক (যাতে টোকেন লিমিট ক্রস না হয়)
                     neighbor_idx = current_idx + offset
                     
                     # চেক করা: এই চাঙ্কটা কি লিস্টে আগেই আছে?
@@ -106,8 +106,8 @@ class QdrantService:
                     final_seen.add(h.id)
                     final_hits.append(h)
 
-            # ★ ৬. সর্বোচ্চ ৫টি চাঙ্ক রাখবো (Groq API-এর টোকেন লিমিট বাঁচাতে)
-            final_hits = final_hits[:5]
+            # ★ ৬. সর্বোচ্চ ৩টি চাঙ্ক রাখবো (যেহেতু প্রতিটি চাঙ্ক এখন অনেক বড়)
+            final_hits = final_hits[:3]
 
             # ৭. LLM-এর জন্য context arrange
             parts = []
