@@ -1,4 +1,6 @@
+# ==========================================
 # Environments
+# ==========================================
 .env
 .env.local
 .env.development.local
@@ -8,7 +10,9 @@
 venv/
 env/
 
+# ==========================================
 # Python
+# ==========================================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -17,10 +21,26 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Documents 
-documents/
+# ==========================================
+# Documents (PDF থাকবে, OCR আউটপুট থাকবে না)
+# ==========================================
+# documents/  <-- এটি বন্ধ করে দিয়েছি যাতে PDF পুশ হয়
+documents/ocr_output/  # শুধু OCR থেকে তৈরি হওয়া ছবি ও টেক্সট ইগনোর হবে
+documents/*.png
 
-# --- Frontend (Node.js / Next.js) ---
+# ==========================================
+# Unwanted Test & Development Files
+# ==========================================
+cleaned_texts/
+fully_cleaned_texts/
+ocr_test/
+test.py
+tes2.py
+generate_markdown.py
+
+# ==========================================
+# Frontend (Node.js / Next.js)
+# ==========================================
 node_modules/
 .next/
 out/
@@ -31,7 +51,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# --- IDE & Editor (VS Code, PyCharm) ---
+# ==========================================
+# IDE & Editor (VS Code, PyCharm)
+# ==========================================
 .vscode/
 .idea/
 *.suo
@@ -40,12 +62,16 @@ yarn-error.log*
 *.sln
 *.sw?
 
-# --- OS Specific ---
+# ==========================================
+# OS Specific
+# ==========================================
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# --- Logs & Temp ---
+# ==========================================
+# Logs & Temp
+# ==========================================
 *.log
 logs/
 tmp/
