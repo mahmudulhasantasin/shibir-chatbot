@@ -45,6 +45,50 @@ def format_clean_lines(s: str) -> str:
     return s.strip()
 
 
+def apply_bold_highlights(s: str) -> str:
+    """
+    নির্দিষ্ট গুরুত্বপূর্ণ বিষয়গুলোকে **বোল্ড** মার্কডাউন ফরম্যাট করে:
+    ১. সিকোয়েন্সিয়াল শব্দ (প্রথমত:, দ্বিতীয়ত:, প্রথমাংশে: ইত্যাদি)
+    ২. ধারা বা আর্টিকেল নম্বর (ধারা-১, ধারা-৪ ইত্যাদি)
+    ৩. দফা বা ফেজ (১ম দফা-, ২য় দফা ইত্যাদি)
+    ৪. নাম্বারিং ও বুলেট (১. / ২. / ১। / ২। / ক. / (ক) ইত্যাদি)
+    ৫. কি-ওয়ার্ড বা লেবেল (প্রশ্ন:, উত্তর:, লক্ষ্য:, উদ্দেশ্য:, ইত্যাদি)
+    ৬. গুরুত্বপূর্ণ ইংরেজি শব্দ বা সংক্ষিপ্ত রূপ (BCS, GPA-5, PDF, AI, Shibir)
+    """
+    if not s:
+        return s
+
+    # নুকতাযুক্ত ডিকম্পোজড বর্ণকে স্ট্যান্ডার্ড ফর্মে আনা
+    s = s.replace('\u09af\u09bc', 'য়').replace('\u09a1\u09bc', 'ড়').replace('\u09a2\u09bc', 'ঢ়')
+
+    # ১. দফা (১ম দফা-, ২য় দফা, ৫ম দফা ইত্যাদি)
+    s = re.sub(r'(?<!\*\*)([১-৯][০-৯]*(?:ম|য়|য়|র্থ|ষ্ঠ|তম)?\s*দফা[-–—:]?)\s*', r'**\1** ', s)
+
+    # ২. ধারা (ধারা-১, ধারা-৪, ধারা ১২ ইত্যাদি)
+    s = re.sub(r'(?<!\*\*)(ধারা[-–—\s]*[০-৯\d]+[:：]?)', r'**\1**', s)
+
+    # ৩. সিকোয়েন্সিয়াল শব্দ (প্রথমত:, দ্বিতীয়ত:, প্রথমাংশে: ইত্যাদি)
+    seq_words = r'(?:প্রথমত|দ্বিতীয়ত|দ্বিতিয়ত|তৃতীয়ত|তৃতীয়ত|চতুর্থত|পঞ্চমত|ষষ্ঠত|সপ্তমত|অষ্টমত|নবমত|দশমত|প্রথমাংশে|দ্বিতীয়াংশে|দ্বিতীয়াংশে)'
+    s = re.sub(r'(?<!\*\*)(?<![\w\u0980-\u09FF])(' + seq_words + r'[:：]?)', r'**\1**', s)
+
+    # ৪. লেবেল ও কীওয়ার্ড (প্রশ্ন:, উত্তর:, লক্ষ্য:, উদ্দেশ্য:, ইত্যাদি)
+    labels = r'(?:প্রশ্ন|উত্তরঃ?|উত্তর|লক্ষ্য|উদ্দেশ্য|কর্তব্য|দায়িত্ব|দায়িত্ব|শর্তাবলী|শর্ত|বৈশিষ্ট্য|যোগ্যতা|বিঃদ্রঃ|উল্লেখ্য|মূল কথা হলো|মূল পয়েন্ট|সাবপয়েন্ট|যথা|সংজ্ঞা)'
+    s = re.sub(r'(?<!\*\*)(?<![\w\u0980-\u09FF])(' + labels + r'[:：])', r'**\1**', s)
+
+    # ৫. লাইনের শুরুতে নাম্বারিং (১. বা ১। বা ক. বা (ক) বা (১))
+    s = re.sub(r'(?m)^(\s*)([০-৯\d]+[।\.])(?!\*)(\s*)', r'\1**\2**\3', s)
+    s = re.sub(r'(?m)^(\s*)([ক-হ][।\.])(?!\*)(\s*)', r'\1**\2**\3', s)
+    s = re.sub(r'(?m)^(\s*)(\([০-৯\dক-হ]+\))(?!\*)(\s*)', r'\1**\2**\3', s)
+
+    # ৬. কমন ইংরেজি শব্দ/সংক্ষিপ্ত রূপ (BCS, GPA-5, PDF, AI, Shibir)
+    s = re.sub(r'(?<![\*\w])(BCS|GPA[-–\s]*5|PDF|AI|Shibir)(?![\*\w])', r'**\1**', s)
+
+    # ডুপ্লিকেট বোল্ড ফিক্স (**** -> **)
+    s = re.sub(r'\*{4,}', '**', s)
+
+    return s
+
+
 def verify_extractive(answer: str, context: str) -> str | None:
     if not answer or not context:
         return None
@@ -53,9 +97,10 @@ def verify_extractive(answer: str, context: str) -> str | None:
     c = context.strip()
 
     def finalize(result: str) -> str:
-        """Return result after stripping leading question line and formatting lines."""
+        """Return result after stripping leading question line, formatting lines, and applying bold styling."""
         stripped = strip_question_heading(result)
-        return format_clean_lines(stripped)
+        formatted = format_clean_lines(stripped)
+        return apply_bold_highlights(formatted)
 
     # 1. Perfect verbatim match
     if a in c:

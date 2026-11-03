@@ -9,8 +9,8 @@ const hindSiliguri = Hind_Siliguri({
 });
 
 export const metadata: Metadata = {
-  title: "শিবির পিডিএফ সহায়ক",
-  description: "ইসলামী ছাত্রশিবিরের দলিল-সংক্রান্ত AI সহায়ক।",
+  title: "সদস্য সহায়িকা",
+  description: "বাংলাদেশ ইসলামী ছাত্রশিবিরের সদস্য সহায়িকা ও নোট সংক্রান্ত AI সহকারী।",
 };
 
 export default function RootLayout({
